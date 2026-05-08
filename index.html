@@ -80,14 +80,14 @@
         <button data-days="90">최근 90일</button>
       </div>
       <div class="note">
-        네이버 공식/지정 카페와 유튜브 영상·댓글 중심으로 이슈 흐름을 확인합니다. 디시인사이드는 약관상 자동 수집을 기본 포함하지 않고, 별도 권한 확보/수동 입력 데이터만 반영합니다.
+        네이버 공식/지정 카페에서 자주 언급되는 단어와 유튜브 영상·댓글 흐름을 확인합니다. 카페 회원수/전체 글 수는 네이버 API 미제공 항목이라 수동 스냅샷만 반영합니다.
       </div>
     </aside>
     <main class="main">
       <div class="topbar">
         <div class="headline">
           <h2 id="pageTitle">Supercell Games Market Pulse</h2>
-          <p id="pageSub">클래시 로얄 · 클래시 오브 클랜 · 브롤스타즈의 검색 관심도, 공식/지정 카페 글, 유튜브 영상/댓글 반응을 한 화면에서 확인합니다.</p>
+          <p id="pageSub">클래시 로얄 · 클래시 오브 클랜 · 브롤스타즈의 검색 관심도, 공식/지정 카페 단어 빈도, 유튜브 영상/댓글 반응을 한 화면에서 확인합니다.</p>
         </div>
         <div class="actions">
           <div class="pill" id="updatedAt">업데이트 확인 중</div>
@@ -143,6 +143,32 @@
         </div>
       </section>
 
+      <section class="grid two" style="margin-top:16px">
+        <div class="card">
+          <div class="card-head"><h3>자주 언급된 단어</h3><small>Word frequency</small></div>
+          <div class="bar-list" id="wordBars"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>검색 결과 총량 스냅샷</h3><small>Naver search total</small></div>
+          <div class="bar-list" id="searchTotalBars"></div>
+          <p style="margin:12px 0 0;color:var(--muted);font-size:12px;line-height:1.5">카페 전체 글 수가 아니라 네이버 검색 API의 검색어별 total 값입니다. 공식 카페 필터는 결과 수집 후 적용됩니다.</p>
+        </div>
+      </section>
+
+
+      <section class="grid two" style="margin-top:16px">
+        <div class="card">
+          <div class="card-head"><h3>자동 발굴 키워드</h3><small>Auto-discovered keywords</small></div>
+          <div class="chips" id="autoKeywordChips"></div>
+          <p style="margin:12px 0 0;color:var(--muted);font-size:12px;line-height:1.5">카페글/유튜브 댓글/수동 입력 데이터에서 조사·불용어를 제외하고 많이 등장한 단어를 자동 추출합니다.</p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>월별 키워드 검색 스냅샷</h3><small>Monthly keyword snapshot</small></div>
+          <div class="bar-list" id="monthlyKeywordBars"></div>
+          <p style="margin:12px 0 0;color:var(--muted);font-size:12px;line-height:1.5">네이버 카페 API는 게시일을 제공하지 않으므로 수집월 기준 스냅샷입니다. officialSampleCount는 지정 카페가 검색 상위 샘플에 잡힌 횟수입니다.</p>
+        </div>
+      </section>
+
       <section class="grid wide" style="margin-top:16px">
         <div class="card">
           <div class="card-head"><h3>대표 여론/이슈 원문</h3><small>Top public mentions</small></div>
@@ -172,7 +198,7 @@
 // 1) Apps Script를 웹 앱으로 배포한 뒤, /exec 로 끝나는 URL을 아래에 붙여넣으세요.
 // 2) API 키는 이 HTML에 넣지 않습니다. NAVER_CLIENT_ID / NAVER_CLIENT_SECRET은 Apps Script의 Script properties에 저장합니다.
 const CONFIG = {
-  APPS_SCRIPT_WEB_APP_URL: 'PASTE_APPS_SCRIPT_WEB_APP_EXEC_URL_HERE'
+  APPS_SCRIPT_WEB_APP_URL: 'https://script.google.com/macros/s/AKfycbz1cPRzGYCDFOWH-34jyJNA6M7GJEBgh4rphgDuYq8HjPhmKblwsdeu2W-TX0XiE54m/exec'
 };
 
 const DEMO = makeDemoData();
@@ -284,6 +310,10 @@ function renderAll(data){
   renderBars('topicBars', data.charts && data.charts.byTopic || [], 'topicGroup', 'mentions', 8);
   renderDonut(k);
   renderRising(data.rising || []);
+  renderWordBars(data.topWords || []);
+  renderSearchTotalBars(data.searchTotalByQuery || []);
+  renderAutoKeywords(data.autoKeywords || []);
+  renderMonthlyKeywordBars(data.monthlyKeywordStats || []);
   renderMentions(data.topMentions || []);
   renderVideos(data.topVideos || []);
   renderComments(data.topComments || []);
@@ -348,6 +378,38 @@ function renderRising(rows){
   el.innerHTML=rows.map(r=>`<span class="chip">${escapeHtml(r.keyword)} <strong>${fmt(r.recentCount||0)}</strong></span>`).join('');
 }
 
+function renderWordBars(rows){
+  const el=document.getElementById('wordBars');
+  rows=(rows||[]).slice(0,12).map(r=>({label:r.word, value:Number(r.count||0), topSource:r.topSource||''}));
+  if(!rows.length){el.innerHTML='<div class="empty">표시할 단어 데이터가 없습니다.</div>';return;}
+  const max=Math.max(...rows.map(r=>r.value),1);
+  el.innerHTML=rows.map(r=>`<div class="bar-row"><div class="bar-label" title="${escapeHtml(r.label)}">${escapeHtml(r.label||'-')}</div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(4,r.value/max*100)}%"></div></div><div class="bar-value">${fmt(r.value)}</div></div>`).join('');
+}
+
+function renderSearchTotalBars(rows){
+  const el=document.getElementById('searchTotalBars');
+  rows=(rows||[]).filter(r=>String(r.source||'').includes('cafe')).slice(0,10).map(r=>({label:r.query, value:Number(r.naverTotal||0)}));
+  if(!rows.length){el.innerHTML='<div class="empty">검색 total 스냅샷이 없습니다.</div>';return;}
+  const max=Math.max(...rows.map(r=>r.value),1);
+  el.innerHTML=rows.map(r=>`<div class="bar-row"><div class="bar-label" title="${escapeHtml(r.label)}">${escapeHtml(r.label||'-')}</div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(4,r.value/max*100)}%"></div></div><div class="bar-value">${fmt(r.value)}</div></div>`).join('');
+}
+
+function renderAutoKeywords(rows){
+  const el=document.getElementById('autoKeywordChips');
+  if(!el) return;
+  const list=(rows||[]).slice(0,48);
+  if(!list.length){ el.innerHTML='<div class="empty">표시할 자동 키워드가 없습니다.</div>'; return; }
+  el.innerHTML=list.map(r=>`<span class="chip">${escapeHtml(r.word || r.keyword || '')}<strong>${fmt(r.count || r.score || 0)}</strong></span>`).join('');
+}
+
+function renderMonthlyKeywordBars(rows){
+  const el=document.getElementById('monthlyKeywordBars');
+  if(!el) return;
+  const list=(rows||[]).slice(0,14).map(r=>Object.assign({},r,{label:(r.month?String(r.month)+' · ':'')+(r.word||r.query||''), value:Number(r.officialSampleCount||0) || Number(r.naverTotal||0)}));
+  if(!list.length){ el.innerHTML='<div class="empty">표시할 월별 키워드 스냅샷이 없습니다.</div>'; return; }
+  renderBars('monthlyKeywordBars', list, 'label', 'value', 14);
+}
+
 function renderMentions(rows){
   const el=document.getElementById('mentionList');
   rows=(rows||[]).slice(0,12);
@@ -381,7 +443,7 @@ function makeDemoData(){
   const dates=Array.from({length:30},(_,i)=>{const d=new Date();d.setDate(d.getDate()-29+i);return d.toISOString().slice(0,10)});
   const byDate=dates.map((date,i)=>({date,mentions:90+Math.round(Math.sin(i/3)*28)+i%7*6,positive:24+i%8,neutral:42+i%10,negative:20+i%9}));
   const trendByDate=dates.map((date,i)=>({date,ratio:50+Math.sin(i/4)*22+(i>22?14:0)+Math.random()*6}));
-  return {meta:{generatedAt:new Date().toISOString(),days:30,gameId:'all'},games,kpi:{mentions:3428,positive:812,neutral:1830,negative:786,trendAvg:62.4,sourceCount:4,negativeRate:23,positiveRate:24},charts:{byDate,trendByDate,bySource:[{source:'cafearticle',mentions:1340},{source:'youtube_video',mentions:520},{source:'youtube_comment',mentions:1180},{source:'dcinside_manual',mentions:388}],byIssue:[{issueCategory:'업데이트/시즌',count:820,negative:110},{issueCategory:'밸런스/메타',count:670,negative:310},{issueCategory:'이벤트/보상',count:540,negative:120},{issueCategory:'과금/상점',count:390,negative:210},{issueCategory:'버그/접속',count:220,negative:180},{issueCategory:'e스포츠/크리에이터',count:190,negative:35}],byTopic:[{topicGroup:'update',mentions:720},{topicGroup:'deck_meta',mentions:610},{topicGroup:'event',mentions:540},{topicGroup:'balance',mentions:420},{topicGroup:'monetization',mentions:360},{topicGroup:'esports',mentions:260}],trendByTopic:[{topicGroup:'update',ratio:74},{topicGroup:'brand',ratio:68},{topicGroup:'event',ratio:55}]},rising:[{gameId:'cr',keyword:'진화카드',recentCount:42},{gameId:'cr',keyword:'밸런스',recentCount:36},{gameId:'cr',keyword:'로얄패스',recentCount:31},{gameId:'coc',keyword:'타운홀',recentCount:39},{gameId:'coc',keyword:'영웅장비',recentCount:28},{gameId:'bs',keyword:'신규브롤러',recentCount:45},{gameId:'bs',keyword:'스킨',recentCount:29}],topMentions:[{date:dates[29],source:'cafearticle',title:'신규 업데이트 이후 메타가 너무 빠르게 바뀐 것 같다는 반응',description:'밸런스와 신규 콘텐츠에 대한 기대와 불만이 함께 언급되고 있습니다.',link:'#',sentiment:'negative',issueCategory:'밸런스/메타'},{date:dates[28],source:'blog',title:'복귀 유저 기준으로 이번 시즌 보상 체감 정리',description:'보상 구조와 이벤트 참여 난이도를 중심으로 정리한 글입니다.',link:'#',sentiment:'neutral',issueCategory:'이벤트/보상'},{date:dates[27],source:'news',title:'슈퍼셀 게임 업데이트 소식에 커뮤니티 관심 증가',description:'신규 콘텐츠 공개 이후 검색량이 증가하는 흐름입니다.',link:'#',sentiment:'positive',issueCategory:'업데이트/시즌'}],topVideos:[{title:'신규 업데이트 리뷰 및 반응 정리',channelTitle:'Creator Channel',url:'#',viewCount:128000,commentCount:430,sentiment:'neutral',issueCategory:'업데이트/시즌'}],topComments:[{videoId:'demo',videoTitle:'신규 업데이트 리뷰 및 반응 정리',channelTitle:'Creator Channel',commentText:'이번 업데이트는 재밌긴 한데 매칭이 좀 빡센 느낌입니다.',url:'#',sentiment:'negative',issueCategory:'밸런스/메타'}]};
+  return {meta:{generatedAt:new Date().toISOString(),days:30,gameId:'all'},games,kpi:{mentions:3428,positive:812,neutral:1830,negative:786,trendAvg:62.4,sourceCount:4,negativeRate:23,positiveRate:24},charts:{byDate,trendByDate,bySource:[{source:'cafearticle',mentions:1340},{source:'youtube_video',mentions:520},{source:'youtube_comment',mentions:1180},{source:'dcinside_manual',mentions:388}],byIssue:[{issueCategory:'업데이트/시즌',count:820,negative:110},{issueCategory:'밸런스/메타',count:670,negative:310},{issueCategory:'이벤트/보상',count:540,negative:120},{issueCategory:'과금/상점',count:390,negative:210},{issueCategory:'버그/접속',count:220,negative:180},{issueCategory:'e스포츠/크리에이터',count:190,negative:35}],byTopic:[{topicGroup:'update',mentions:720},{topicGroup:'deck_meta',mentions:610},{topicGroup:'event',mentions:540},{topicGroup:'balance',mentions:420},{topicGroup:'monetization',mentions:360},{topicGroup:'esports',mentions:260}],trendByTopic:[{topicGroup:'update',ratio:74},{topicGroup:'brand',ratio:68},{topicGroup:'event',ratio:55}]},topWords:[{word:'진화카드',count:82},{word:'밸런스',count:65},{word:'로얄패스',count:42},{word:'타운홀',count:39},{word:'브롤러',count:35}],searchTotalByQuery:[{source:'cafearticle',query:'클래시로얄 업데이트',naverTotal:12400},{source:'cafearticle',query:'브롤스타즈 이벤트',naverTotal:9800},{source:'cafearticle',query:'클오클 타운홀',naverTotal:7400}],autoKeywords:[{word:'진화카드',count:82,score:120},{word:'로얄패스',count:42,score:77},{word:'타운홀',count:39,score:72},{word:'영웅장비',count:28,score:61},{word:'신규브롤러',count:45,score:86}],monthlyKeywordStats:[{month:'2026-05',word:'진화카드',officialSampleCount:24,naverTotal:6100},{month:'2026-05',word:'로얄패스',officialSampleCount:18,naverTotal:4200},{month:'2026-05',word:'타운홀',officialSampleCount:16,naverTotal:3900}],rising:[{gameId:'cr',keyword:'진화카드',recentCount:42},{gameId:'cr',keyword:'밸런스',recentCount:36},{gameId:'cr',keyword:'로얄패스',recentCount:31},{gameId:'coc',keyword:'타운홀',recentCount:39},{gameId:'coc',keyword:'영웅장비',recentCount:28},{gameId:'bs',keyword:'신규브롤러',recentCount:45},{gameId:'bs',keyword:'스킨',recentCount:29}],topMentions:[{date:dates[29],source:'cafearticle',title:'신규 업데이트 이후 메타가 너무 빠르게 바뀐 것 같다는 반응',description:'밸런스와 신규 콘텐츠에 대한 기대와 불만이 함께 언급되고 있습니다.',link:'#',sentiment:'negative',issueCategory:'밸런스/메타'},{date:dates[28],source:'blog',title:'복귀 유저 기준으로 이번 시즌 보상 체감 정리',description:'보상 구조와 이벤트 참여 난이도를 중심으로 정리한 글입니다.',link:'#',sentiment:'neutral',issueCategory:'이벤트/보상'},{date:dates[27],source:'news',title:'슈퍼셀 게임 업데이트 소식에 커뮤니티 관심 증가',description:'신규 콘텐츠 공개 이후 검색량이 증가하는 흐름입니다.',link:'#',sentiment:'positive',issueCategory:'업데이트/시즌'}],topVideos:[{title:'신규 업데이트 리뷰 및 반응 정리',channelTitle:'Creator Channel',url:'#',viewCount:128000,commentCount:430,sentiment:'neutral',issueCategory:'업데이트/시즌'}],topComments:[{videoId:'demo',videoTitle:'신규 업데이트 리뷰 및 반응 정리',channelTitle:'Creator Channel',commentText:'이번 업데이트는 재밌긴 한데 매칭이 좀 빡센 느낌입니다.',url:'#',sentiment:'negative',issueCategory:'밸런스/메타'}]};
 }
 
 function showToast(msg){const el=document.getElementById('toast');el.textContent=msg;el.style.display='block';clearTimeout(window.__toast);window.__toast=setTimeout(()=>el.style.display='none',2200)}
